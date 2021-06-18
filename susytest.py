@@ -28,15 +28,23 @@ class SusyURLValidator(click.ParamType):
         return value
 
 
+class TestsNotFoundError(Exception):
+    """No test cases files found on web page"""
+    pass
+
+
 def match_files(html):
     """Extract test file names from HTML source"""
-    end = re.search(r'Testes fechados', html).end()
-    matches = re.findall(r'"arq\d.in"|"arq\d.res"', html[ : end])
+    try:
+        end = re.search(r'Testes fechados', html).end()
+        matches = re.findall(r'"(arq\d.\w+)"', html[ : end])
+    except AttributeError:
+        raise TestsNotFoundError
 
-    files = []
-    for i, j in zip(range(len(matches) - 1), range(1, len(matches))):
-        t = (matches[i].replace('"', ''), matches[j].replace('"', ''))
-        files.append(t)
+    if len(matches) < 2:
+        raise TestsNotFoundError
+
+    files = [tuple(matches[i:i+2]) for i in range(0, len(matches), 2)]
     return files
 
 
@@ -49,8 +57,10 @@ def download_tests(url):
     html = _download(url + '/dados/testes.html')
     files = match_files(html)
     tests = []
-    for _in, _sol in files:
+    for i, val in enumerate(files):
+        _in, _sol = val
         t = {
+            'id': i,
             'in': _download(url + '/dados/' + _in).splitlines(keepends=True),
             'sol': _download(url + '/dados/' + _sol).splitlines(keepends=True)
         }
@@ -73,11 +83,8 @@ def cli(url, prog, nodiff, verbose):
         click.echo("URL:\t" + url['url'])
         click.echo("Prog:\t" + prog)
 
-    tests = download_tests(url['url'])
-
-    i = 0
-    for test in tests:
-        click.echo(f'==== TEST {i}====')
-        click.echo('Input:\n' + pp.pformat(test['in']))
-        click.echo('Solution:\n' + pp.pformat(test['sol']))
-        i += 1
+    try:
+        tests = download_tests(url['url'])
+        click.echo('Test Cases:\n' + pp.pformat(tests))
+    except TestsNotFoundError:
+        click.echo(f"No test files found at \"{url['url']}\".")
