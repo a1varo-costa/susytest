@@ -1,7 +1,9 @@
 from urllib.request import urlopen
+import subprocess
 import pprint
 import click
 import ssl
+import sys
 import re
 
 class SusyURLValidator(click.ParamType):
@@ -68,6 +70,18 @@ def download_tests(url):
     return tests
 
 
+def run(cmd, _in):
+    proc = subprocess.run(
+        args            = cmd,
+        input           = ''.join(_in),
+        encoding        = 'utf-8',
+        capture_output  = True,
+        check           = True,
+        timeout         = 1.5    # seconds
+    )
+    return proc
+
+
 @click.command()
 @click.option('-n', '--nodiff', is_flag=True, help='Disable output diff.')
 @click.option('-v', '--verbose', is_flag=True, help='Enable verbose output.')
@@ -80,11 +94,32 @@ def cli(url, prog, nodiff, verbose):
     pp = pprint.PrettyPrinter(indent=4, width=79)
 
     if verbose:
-        click.echo("URL:\t" + url['url'])
-        click.echo("Prog:\t" + prog)
+        click.echo(f"URL:\t\t\"{url['url']}\"")
+        click.echo(f"Prog:\t\t\"{prog}\"")
 
     try:
         tests = download_tests(url['url'])
-        click.echo('Test Cases:\n' + pp.pformat(tests))
+        click.echo(f'Test Cases:\t{len(tests)}\n')
     except TestsNotFoundError:
-        click.echo(f"No test files found at \"{url['url']}\".")
+        click.echo(f"> No test files found at \"{url['url']}\".")
+        sys.exit(1)
+
+    for test in tests:
+        try:
+            click.echo(f">> TEST {test['id']}")
+            result = run(prog, test['in'])
+
+            if verbose:
+                click.echo(
+                    f'> Input:\n' + pp.pformat(test['in'])
+                )
+                click.echo(
+                    f'> Output:\n' + pp.pformat(result.stdout.splitlines(keepends=True))
+                )
+        except subprocess.TimeoutExpired as e:
+            click.echo(f'> Timeout of {e.timeout}s expired while waiting for program "{e.cmd}".')
+        except subprocess.CalledProcessError as e:
+            click.echo(f'> Program "{e.cmd}" returned non-zero exit status {e.returncode}.')
+        except:
+            click.echo(f'> Unexpected error. Aborting...')
+            sys.exit(1)
